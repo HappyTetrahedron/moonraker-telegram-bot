@@ -31,6 +31,7 @@ from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Inp
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackContext, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram_helper import TelegramMessageRepr
 
 from camera import Camera, FFmpegCamera, MjpegCamera
 from configuration import ConfigWrapper
@@ -152,26 +153,15 @@ async def status_no_confirm(effective_message: Message) -> None:
         time.sleep(configWrap.camera.light_timeout + 1.5)
         await effective_message.delete()
     else:
-        mess = await klippy.get_status()
+        text = await klippy.get_status()
+        message = TelegramMessageRepr(text, parse_mode=ParseMode.HTML, silent=notifier.silent_commands)
         if cameraWrap.enabled:
             loop_loc = asyncio.get_running_loop()
             with await loop_loc.run_in_executor(executors_pool, cameraWrap.take_photo) as bio:
-                await effective_message.get_bot().send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.UPLOAD_PHOTO)
-                await effective_message.reply_photo(
-                    photo=bio,
-                    caption=mess,
-                    parse_mode=ParseMode.HTML,
-                    disable_notification=notifier.silent_commands,
-                )
+                await message.send_as_reply(effective_message, photo=bio)
                 bio.close()
         else:
-            await effective_message.get_bot().send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.TYPING)
-            await effective_message.reply_text(
-                mess,
-                parse_mode=ParseMode.HTML,
-                disable_notification=notifier.silent_commands,
-                quote=True,
-            )
+            await message.send_as_reply(effective_message)
 
 
 async def status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
