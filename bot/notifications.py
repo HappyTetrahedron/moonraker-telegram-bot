@@ -53,6 +53,7 @@ class Notifier:
         self._silent_status: bool = config.telegram_ui.silent_status
         self._pin_status_single_message: bool = config.telegram_ui.pin_status_single_message
         self._status_message_m117_update: bool = config.telegram_ui.status_message_m117_update
+        self._use_status_update_button: bool = config.telegram_ui.status_update_button
         self._message_parts: List[str] = config.status_message_content.content
 
         self._last_height: int = 0
@@ -130,7 +131,6 @@ class Notifier:
 
     async def _send_message(self, message: TelegramMessageRepr, group_only: bool = False, manual: bool = False) -> None:
         if not group_only:
-            await self._bot.send_chat_action(chat_id=self._chat_id, action=ChatAction.TYPING)
             if self._status_message and not manual:
                 if self._bzz_mess_id != 0:
                     try:
@@ -164,7 +164,6 @@ class Notifier:
         loop = asyncio.get_running_loop()
         with await loop.run_in_executor(self._executors_pool, self._cam_wrap.take_photo) as photo:
             if not group_only:
-                await self._bot.send_chat_action(chat_id=self._chat_id, action=ChatAction.UPLOAD_PHOTO)
                 if self._status_message and not manual:
                     if self._bzz_mess_id != 0:
                         try:
@@ -320,10 +319,23 @@ class Notifier:
         if "last_update_time" in self._message_parts:
             mess += f"_Last update at {datetime.now():%H:%M:%S}_"
 
+        inline_keyboard = None
+        if self._use_status_update_button:
+            inline_keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text="Update",
+                            callback_data="updstatus",
+                        )
+                    ]
+                ]
+            )
         tg_message = TelegramMessageRepr(
             text=mess,
             silent=self._silent_progress,
             suppress_escaping=True,
+            reply_markup=inline_keyboard,
         )
 
         self._sched.add_job(
