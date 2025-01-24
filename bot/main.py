@@ -31,6 +31,7 @@ from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Inp
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackContext, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram_helper import TelegramMessageRepr
 
 from camera import Camera, FFmpegCamera, MjpegCamera
 from configuration import ConfigWrapper
@@ -147,31 +148,40 @@ async def unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def status_no_confirm(effective_message: Message) -> None:
+    is_inline_button_press = effective_message.from_user is not None and effective_message.from_user.id == effective_message.get_bot().id
     if klippy.printing and not configWrap.notifications.group_only:
         notifier.update_status()
         time.sleep(configWrap.camera.light_timeout + 1.5)
-        await effective_message.delete()
+        if not is_inline_button_press:
+            await effective_message.delete()
     else:
-        mess = await klippy.get_status()
+        text = await klippy.get_status()
+        inline_keyboard = None
+        if configWrap.telegram_ui.status_update_button:
+            inline_keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            text="Update",
+                            callback_data="updstatus",
+                        )
+                    ]
+                ]
+            )
+        message = TelegramMessageRepr(text, parse_mode=ParseMode.HTML, silent=notifier.silent_commands, reply_markup=inline_keyboard)
         if cameraWrap.enabled:
             loop_loc = asyncio.get_running_loop()
             with await loop_loc.run_in_executor(executors_pool, cameraWrap.take_photo) as bio:
-                await effective_message.get_bot().send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.UPLOAD_PHOTO)
-                await effective_message.reply_photo(
-                    photo=bio,
-                    caption=mess,
-                    parse_mode=ParseMode.HTML,
-                    disable_notification=notifier.silent_commands,
-                )
+                if is_inline_button_press:
+                    await message.update_existing(effective_message, photo=bio)
+                else:
+                    await message.send_as_reply(effective_message, photo=bio)
                 bio.close()
         else:
-            await effective_message.get_bot().send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.TYPING)
-            await effective_message.reply_text(
-                mess,
-                parse_mode=ParseMode.HTML,
-                disable_notification=notifier.silent_commands,
-                quote=True,
-            )
+            if is_inline_button_press:
+                await message.update_existing(effective_message)
+            else:
+                await message.send_as_reply(effective_message)
 
 
 async def status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -681,7 +691,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.error("Undefined callback_query.data for %s", query.to_json())
         return
 
-    await context.bot.send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.TYPING)
+    if "updstatus" not in query.data:
+        await context.bot.send_chat_action(chat_id=configWrap.secrets.chat_id, action=ChatAction.TYPING)
 
     await query.answer()
     if query.data == "do_nothing":
@@ -695,6 +706,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         cameraWrap.cleanup_unfinished_lapses()
     elif "gcode:" in query.data:
         await ws_helper.execute_ws_gcode_script(query.data.replace("gcode:", ""))
+    elif "updstatus" in query.data:
+        await status_no_confirm(update.effective_message)
+        delete_query = False
     elif update.effective_message.reply_to_message is None:
         logger.error("Undefined reply_to_message for %s", update.effective_message.to_json())
     elif query.data == "emergency_stop":
