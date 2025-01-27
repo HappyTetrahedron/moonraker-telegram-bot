@@ -171,7 +171,7 @@ class Notifier:
                         except BadRequest as badreq:
                             logger.warning("Failed deleting bzz message \n%s", badreq)
                             self._bzz_mess_id = 0
-                    await message.update_existing(self._status_message)
+                    await message.update_existing(self._status_message, photo=photo)
 
                     if self._progress_update_message:
                         mes = await self._bot.send_message(self._chat_id, text="Status has been updated\nThis message will be deleted", disable_notification=message.is_silent())
